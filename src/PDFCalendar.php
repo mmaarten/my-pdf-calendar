@@ -20,6 +20,8 @@ class PDFCalendar
     {
         $this->config = wp_parse_args($config, [
             'file_title' => 'Untitled',
+            'logo'       => '',
+            'all_day_text' => 'all-day',
             'font_family' => 'Arial',
             'font_weight' => '',
             'font_size_base' => 11,
@@ -35,13 +37,25 @@ class PDFCalendar
             'fill_color' => [255, 255, 255],
             'color_light' => [147, 147, 147],
             'days' => 7,
-            'line_width' => 0.2,
+            'line_width' => 0.1,
             'hour_start' => 9,
             'hour_end' => 17,
             'events' => [],
             'event_default_color' => [0, 0, 0],
         ]);
 
+        $this->reset();
+
+        // Add events.
+        foreach ($this->config['events'] as $event) {
+            $this->addEvent($event);
+        }
+
+        $this->prepare();
+    }
+
+    protected function reset()
+    {
         $this->margin = [
             'x' => 10,
             'y' => 10,
@@ -73,28 +87,21 @@ class PDFCalendar
             'h' => $this->page['h'] - $this->header['y'] - $this->header['h'] - $this->footer['h'] - $this->margin['y'] - 14,
         ];
 
-        $days_height = 15;
+        $hours_w = 15;
+
+        $this->days = [
+            'x' => $this->content['x'] + $hours_w,
+            'y' => $this->content['y'],
+            'w' => $this->content['w'] - $hours_w,
+            'h' => 15,
+        ];
 
         $this->hours = [
             'x' => $this->content['x'],
-            'y' => $this->content['y'] + $days_height,
-            'w' => 12,
-            'h' => $this->content['h'] - $days_height,
+            'y' => $this->content['y'] + $this->days['h'],
+            'w' => $hours_w,
+            'h' => $this->content['h'] - $this->days['h'],
         ];
-
-        $this->days = [
-            'x' => $this->content['x'] + $this->hours['w'],
-            'y' => $this->content['y'],
-            'w' => $this->content['w'] - $this->hours['w'],
-            'h' => $days_height,
-        ];
-
-        // Add events.
-        foreach ($this->config['events'] as $event) {
-            $this->addEvent($event);
-        }
-
-        $this->prepare();
     }
 
     public function addEvent($args)
@@ -105,6 +112,7 @@ class PDFCalendar
             'from'        => '',
             'until'       => '',
             'text'        => '',
+            'allday'      => false,
             'color'       => $this->config['event_default_color'],
         ]);
 
@@ -142,9 +150,9 @@ class PDFCalendar
         return [];
     }
 
-    protected function getDayX($num)
+    protected function getDayX($day_of_week)
     {
-        return $this->days['x'] + $this->getDayWidth() * ($num - 1);
+        return $this->days['x'] + $this->getDayWidth() * ($day_of_week - 1);
     }
 
     protected function getDayWidth()
@@ -231,7 +239,10 @@ class PDFCalendar
     protected function renderHeader()
     {
         // Logo
-        if (has_custom_logo()) {
+        if ($this->config['logo'] && file_exists($this->config['logo'])) {
+
+            $image_url = $this->config['logo'];
+
             // Setup wrapper.
 
             $wrapper_width = 50;
@@ -245,9 +256,11 @@ class PDFCalendar
 
             // Get image properties.
 
-            $image_id = get_theme_mod('custom_logo');
+            list($image_width, $image_height) = @getimagesize($image_url);
 
-            list($image_url, $image_width, $image_height) = wp_get_attachment_image_src($image_id, 'full');
+            if (! $image_width || ! $image_height) {
+                return;
+            }
 
             // Scale to fit wrapper.
 
@@ -277,6 +290,7 @@ class PDFCalendar
     protected function renderContent()
     {
         $this->renderDays();
+        $this->renderAllDay();
         $this->renderHours();
         $this->renderEvents();
     }
@@ -291,13 +305,19 @@ class PDFCalendar
 
         // Draw vertical lines
         for ($day = 1; $day <= $this->config['days']; $day++) {
+            if ($day === 1) {
+                continue;
+            }
+
             $x = $this->getDayX($day);
-            $y = $this->getTimeY($this->hour_start);
-            $w = $this->getDayX($day + 1) - $x;
-            $h = $this->getTimeY($this->hour_end) - $y;
+            $y = $this->hours['y'];
+            $h = $this->hours['h'];
+
+            $this->pdf->SetFillColor($this->config['color_light']);
             $this->pdf->SetDrawColor($this->config['color_light']);
-            $this->pdf->Rect($x, $y, $w, $h, 'D');
+            $this->pdf->Rect($x, $y, $this->config['line_width'], $h, 'DF');
             $this->pdf->SetDrawColor($this->config['draw_color']);
+            $this->pdf->SetFillColor($this->config['fill_color']);
         }
     }
 
@@ -313,15 +333,9 @@ class PDFCalendar
             $this->pdf->setFontSize($this->config['font_size_base']);
             $this->pdf->SetTextColor($this->config['text_color']);
             // Line (drawing a rectangle is more precise than a line)
-            $line_width = $this->config['line_width'];
-            $offset = 0;
             $this->pdf->SetFillColor($this->config['color_light']);
             $this->pdf->SetDrawColor($this->config['color_light']);
-            if ($hour == $this->hour_start || $hour == $this->hour_end) {
-                $line_width = 1;
-                $offset = -$line_width / 2;
-            }
-            $this->pdf->Rect($this->days['x'], $y + $offset, $this->days['w'], $line_width, 'DF');
+            $this->pdf->Rect($this->days['x'], $y, $this->days['w'], $this->config['line_width'], 'DF');
             $this->pdf->SetDrawColor($this->config['draw_color']);
             $this->pdf->SetFillColor($this->config['fill_color']);
         }
@@ -332,15 +346,111 @@ class PDFCalendar
         $events = $this->getEvents();
 
         foreach ($events as $event) {
-            $this->renderEvent($event);
+            if ($event['allday']) {
+            } else {
+                $this->renderEvent($event);
+            }
         }
+    }
+
+    protected function renderAllDay()
+    {
+        $events = $this->getEvents();
+
+        $my_events = [];
+        foreach ($events as $event) {
+            if ($event['allday']) {
+                $my_events[$event['day_of_week']][] = $event;
+            }
+        }
+
+        if (! $my_events) {
+            return;
+        }
+
+        $all_day = [
+            'x' => $this->days['x'],
+            'y' => $this->days['y'] + $this->days['h'],
+            'w' => $this->days['w'],
+            'h' => 0,
+        ];
+
+        $_y = 0;
+
+        foreach ($my_events as $day_of_week => $events) {
+            $this->pdf->setY($all_day['y']);
+
+            $this->pdf->setY($this->pdf->getY() + 1);
+
+            foreach ($events as $event) {
+                $x = $this->getDayX($day_of_week);
+
+                // Draw name.
+                $this->pdf->setX($x);
+                $this->pdf->SetFont($this->config['font_family'], 'B', $this->config['font_size_small']);
+                $this->pdf->MultiCell($this->getDayWidth(), $this->config['line_height_small'], $this->pdf->SanitizeText($event['name']), 0, 'L');
+                $this->pdf->SetFont($this->config['font_family'], $this->config['font_weight'], $this->config['font_size_base']);
+
+                // Draw text.
+                if ($event['text']) {
+                    $this->pdf->setXY($x, $this->pdf->getY());
+                    $this->pdf->SetFont($this->config['font_family'], 'I', $this->config['font_size_small']);
+                    $this->pdf->MultiCell($w, $this->config['line_height_small'], $this->pdf->SanitizeText($event['text']), 0, 'L');
+                    $this->pdf->SetFont($this->config['font_family'], $this->config['font_weight'], $this->config['font_size_base']);
+                }
+            }
+
+            $this->pdf->setY($this->pdf->getY() + 1);
+
+            $y = $this->pdf->getY();
+
+            if ($y > $_y) {
+                $_y = $y;
+            }
+        }
+
+        $all_day['h'] = $y - $all_day['y'];
+        $this->hours['h'] = $this->hours['h'] + ($this->hours['y'] - $_y);
+        $this->hours['y'] = $_y;
+
+        // Draw vertical lines
+        for ($day = 1; $day <= $this->config['days']; $day++) {
+            if ($day === 1) {
+                continue;
+            }
+            $x = $this->getDayX($day);
+            $y = $all_day['y'];
+            $h = $all_day['h'];
+
+            $this->pdf->SetFillColor($this->config['color_light']);
+            $this->pdf->SetDrawColor($this->config['color_light']);
+            $this->pdf->Rect($x, $y, $this->config['line_width'], $h, 'DF');
+            $this->pdf->SetDrawColor($this->config['draw_color']);
+            $this->pdf->SetFillColor($this->config['fill_color']);
+        }
+
+        // Draw horizontal lines
+        $this->pdf->SetFillColor($this->config['color_light']);
+        $this->pdf->SetDrawColor($this->config['color_light']);
+        $this->pdf->Rect($all_day['x'], $all_day['y'], $all_day['w'], $this->config['line_width'], 'DF');
+        $this->pdf->Rect($all_day['x'], $all_day['y'] + $all_day['h'], $all_day['w'], .5, 'DF');
+        $this->pdf->SetDrawColor($this->config['draw_color']);
+        $this->pdf->SetFillColor($this->config['fill_color']);
+
+        // Text
+        $this->pdf->setXY($this->hours['x'], $all_day['y']);
+        $this->pdf->setFontSize($this->config['font_size_small']);
+        $this->pdf->SetTextColor($this->config['color_light']);
+        $this->pdf->MultiCell($this->hours['w'], 0, $this->pdf->SanitizeText($this->config['all_day_text']));
+        $this->pdf->setFontSize($this->config['font_size_base']);
+        $this->pdf->SetTextColor($this->config['text_color']);
     }
 
     protected function renderEvent($event)
     {
         $x = $this->getDayX($event['day_of_week']);
         $y = $this->getTimeY($event['from']);
-        $w = $this->getDayX($event['day_of_week'] + 1) - $x;
+        $w = $this->getDayWidth();
         $h = $this->getTimeY($event['until']) - $y;
 
         // Overlap.
@@ -406,12 +516,14 @@ class PDFCalendar
         $this->hour_end   = $this->config['hour_end'];
 
         foreach ($events as $event) {
-            if ($event['from'] < $this->hour_start) {
-                $this->hour_start = $event['from'];
-            }
+            if (! $event['allday']) {
+                if ($event['from'] < $this->hour_start) {
+                    $this->hour_start = $event['from'];
+                }
 
-            if ($event['until'] > $this->hour_end) {
-                $this->hour_end = $event['until'];
+                if ($event['until'] > $this->hour_end) {
+                    $this->hour_end = $event['until'];
+                }
             }
         }
 
@@ -421,6 +533,8 @@ class PDFCalendar
         $this->renderHeader();
         $this->renderContent();
         $this->renderFooter();
+
+        $this->reset();
 
         //$this->renderGuides();
     }
