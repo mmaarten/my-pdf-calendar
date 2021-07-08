@@ -42,4 +42,17 @@ class Helpers
 
         return compact('width', 'height');
     }
+
+    /**
+     * @link https://stackoverflow.com/questions/2040560/finding-the-number-of-days-between-two-dates
+     */
+    public static function getDaysBetween($date_1, $date_2)
+    {
+        $date_1 = strtotime($date_1);
+        $date_2 = strtotime($date_2);
+
+        $diff = abs($date_1 - $date_2);
+
+        return ceil($diff / (60 * 60 * 24));
+    }
 }
