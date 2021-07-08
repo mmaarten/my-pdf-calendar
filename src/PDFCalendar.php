@@ -390,11 +390,18 @@ class PDFCalendar
 
         $events = $this->getEvents();
 
+        $my_events = [];
         foreach ($events as $event) {
-            if (! $event['allDay']) {
-                continue;
+            if ($event['allDay']) {
+                $my_events[] = $event;
             }
+        }
 
+        if (! $my_events) {
+            return;
+        }
+
+        foreach ($my_events as $event) {
             if (! isset($_y[$event['day_of_week']])) {
                 $_y[$event['day_of_week']] = 0;
             }
