@@ -220,6 +220,12 @@ class PDFCalendar
                 continue;
             }
 
+            if (! empty($args['allDay'])) {
+                $d = new \DateTime($args['end'], $this->timezone);
+                $d->modify('+1 day');
+                $args['end'] = $d->format('Y-m-d');
+            }
+
             $days = Helpers::getDaysBetween($args['start'], $args['end']);
 
             $date = new \DateTime($args['start'], $this->timezone);

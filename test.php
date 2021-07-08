@@ -17,7 +17,7 @@ $pdf = new PDFCalendar([
         [
             'name'   => 'My Other Event',
             'start'  => '2021-06-01',
-            'end'    => '2021-06-03',
+            'end'    => '2021-06-01',
             'text'  => 'Text.',
             'allDay' => true,
         ],
