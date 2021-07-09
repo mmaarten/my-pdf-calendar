@@ -36,7 +36,7 @@ class PDFCalendar
             'title_font_size'     => 16,
             'draw_color'          => [0, 0, 0],
             'fill_color'          => [255, 255, 255],
-            'color_light'         => [147, 147, 147],
+            'color_light'         => [215, 215, 215],
             'line_width'          => 0.1,
             'hour_start'          => 9,
             'hour_end'            => 17,
@@ -362,7 +362,7 @@ class PDFCalendar
             // Text
             $this->pdf->setXY($this->hours['x'], $this->getTimeY($hour));
             $this->pdf->setFontSize($this->config['font_size_small']);
-            $this->pdf->SetTextColor($this->config['color_light']);
+            $this->pdf->SetTextColor($this->config['text_color']);
             $this->pdf->MultiCell($this->hours['w'], 0, $this->pdf->SanitizeText(Helpers::hoursToTime($hour)));
             $this->pdf->setFontSize($this->config['font_size_base']);
             $this->pdf->SetTextColor($this->config['text_color']);
