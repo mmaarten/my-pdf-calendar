@@ -4,18 +4,17 @@ namespace My\PDFCalendar;
 
 class PDFCalendar
 {
-    const DAYS_IN_WEEK = 7;
-
-    protected $pdf = null;
-    protected $config = [];
-    protected $page = [];
-    protected $header = [];
+    protected $pdf     = null;
+    protected $config  = [];
+    protected $page    = [];
+    protected $header  = [];
     protected $content = [];
-    protected $days = [];
-    protected $hours = [];
-    protected $events = [];
-    protected $year = null;
-    protected $week = null;
+    protected $days    = [];
+    protected $hours   = [];
+    protected $events  = [];
+    protected $slots   = [];
+    protected $year    = null;
+    protected $week    = null;
 
     public function __construct($config = [])
     {
@@ -37,11 +36,14 @@ class PDFCalendar
             'fill_color'          => [255, 255, 255],
             'color_light'         => [147, 147, 147],
             'line_width'          => 0.1,
+            'days_in_week'        => 7,
             'hour_start'          => 9,
             'hour_end'            => 17,
             'events'              => [],
             'event_default_color' => [0, 0, 0],
             'logo_wrapper_width'  => 50,
+            'date_format'         => 'D j',
+            'month_text'          => '',
             'debug'               => false,
         ]);
 
@@ -77,7 +79,7 @@ class PDFCalendar
             'x' => $this->content['x'] + $hours_w,
             'y' => $this->content['y'],
             'w' => $this->content['w'] - $hours_w,
-            'h' => 15,
+            'h' => 10,
         ];
 
         $this->hours = [
@@ -91,13 +93,12 @@ class PDFCalendar
         foreach ($this->config['events'] as $event) {
             $this->addEvent($event);
         }
-
-        $this->prepare();
     }
 
     public function addEvent($args)
     {
         $event = wp_parse_args($args, [
+            'id'    => '',
             'name'  => '',
             'date'  => '', // Y-m-d
             'start' => '', // H:i:s
@@ -106,29 +107,27 @@ class PDFCalendar
             'color' => $this->config['event_default_color'],
         ]);
 
-        $time = strtotime($event['date']);
+        $date = strtotime($args['date']);
 
         if ($time === false) {
             return;
         }
 
-        $year        = (int) date('Y', $time);
-        $week        = (int) date('W', $time);
-        $month       = (int) date('n', $time);
-        $day         = (int) date('j', $time);
-        $day_of_week = (int) date('N', $time);
-        $start       = Helpers::timeToHours($event['start']);
-        $end         = Helpers::timeToHours($event['end']);
+        $event = [];
+        $event['id']          = $args['id'];
+        $event['text']        = $args['text'];
+        $event['name']        = $args['name'];
+        $event['date']        = date('Y-m-d', $date);
+        $event['start']       = Helpers::timeToHours($args['start']);
+        $event['end']         = Helpers::timeToHours($args['end']);
+        $event['year']        = intval(date('Y', $date));
+        $event['month']       = intval(date('n', $date));
+        $event['day']         = intval(date('j', $date));
+        $event['week']        = intval(date('W', $date));
+        $event['day_of_week'] = intval(date('N', $date));
+        $event['color']       = $args['color'];
 
-        $event = [
-            'month'       => $month,
-            'day'         => $day,
-            'day_of_week' => $day_of_week,
-            'start'       => $start,
-            'end'         => $end,
-        ] + $event;
-
-        $this->events[$year][$week][] = $event;
+        $this->events[$event['year']][$event['week']][$event['day_of_week']][$event['id']] = $event;
     }
 
     protected function getEvents()
@@ -147,25 +146,12 @@ class PDFCalendar
 
     protected function getDayWidth()
     {
-        return $this->days['w'] / self::DAYS_IN_WEEK;
+        return $this->days['w'] / $this->config['days_in_week'];
     }
 
     protected function getTimeY($hours)
     {
-        return $this->hours['y'] + (($this->hours['h'] / ($this->hour_end - $this->hour_start)) * ($hours - $this->hour_start));
-    }
-
-    protected function getOverlappingEvents($event, $events)
-    {
-        $return = [];
-
-        foreach ($events as $key => $_event) {
-            if ($event['day'] == $_event['day'] && $_event['start'] < $event['end'] && $event['start'] < $_event['end']) {
-                $return[$key] = $_event;
-            }
-        }
-
-        return $return;
+        return $this->hours['y'] + (($this->hours['h'] / ($this->config['hour_end'] - $this->config['hour_start'])) * ($hours - $this->config['hour_start']));
     }
 
     protected function getDateTime($format, $day_of_week = 1)
@@ -179,7 +165,7 @@ class PDFCalendar
     protected function getMonthTitle()
     {
         $time_1 = $this->getDateTime('U');
-        $time_2 = strtotime(date('Y-m-d', $time_1) . ' + ' . self::DAYS_IN_WEEK . ' days');
+        $time_2 = strtotime(date('Y-m-d', $time_1) . ' + ' . $this->config['days_in_week'] . ' days');
 
         $month_1 = date_i18n('F', $time_1);
         $month_2 = date_i18n('F', $time_2);
@@ -188,42 +174,81 @@ class PDFCalendar
         $year_2 = date('Y', $time_2);
 
         if ($month_1 == $month_2 && $year_1 == $year_2) {
-            return "{$month_1} {$year_1}";
+            $return =  "{$month_1} {$year_1}";
         }
 
         if ($month_1 != $month_2 && $year_1 == $year_2) {
-            return "{$month_1} - {$month_2} {$year_1}";
+            $return = "{$month_1} - {$month_2} {$year_1}";
         }
 
-        return "{$month_1} {$year_1} - {$month_2} {$year_2}";
+        $return =  "{$month_1} {$year_1} - {$month_2} {$year_2}";
+    
+        $callback = $this->config['month_text'];
+
+        if ($callback && is_callable($callback)) {
+            $return = call_user_func($callback, $return, $time_1, $time_2);
+        }
+
+        return $return;
     }
 
-    protected function prepare()
+    public function sortEvents($a, $b)
     {
-        foreach ($this->events as $year => $year_events) {
-            foreach ($year_events as $week => $events) {
-                $a = [];
-                foreach ($events as $event) {
-                    $overlapping = $this->getOverlappingEvents($event, $events);
-                    if (! $overlapping) {
-                        continue;
+        if ($a['start'] == $b['start']) {
+            return 0;
+        }
+        return ($a['start'] < $b['start']) ? -1 : 1;
+    }
+
+    public function prepare()
+    {
+        foreach ($this->events as $year => &$year_events) {
+            ksort($year_events);
+            foreach ($year_events as $week => &$week_events) {
+                ksort($week_events);
+                foreach ($week_events as $day_of_week => &$events) {
+                    usort($events, [$this, 'sortEvents']);
+                    
+                    $slots = [];
+                    foreach ($events as &$event) {
+                        //
+                        $event['end'] -= 1/(60*60);
+                        // Get available slot
+                        $index = 0;
+                        $free = false;
+                        while (! $free) {
+                            $free = true;
+                            for ($hour = $event['start']; $hour <= $event['end']; $hour += 1/60) {
+                                if (isset($slots["$hour"][$index])) {
+                                    $free = false;
+                                    $index++;
+                                    break;
+                                }
+                            }
+                        }
+                        $event['index'] = $index;
+                        // Add event to slot
+                        for ($hour = $event['start']; $hour <= $event['end']; $hour += 1/60) {
+                            $slots["$hour"][$index] = $event['id'];
+                        }
+                    }
+                    foreach ($events as &$event) {
+                        $width = 0;
+                        for ($hour = $event['start']; $hour <= $event['end']; $hour += 1/60) {
+                            $count = count($slots["$hour"]);
+                            if ($count > $width) {
+                                $width = $count;
+                            }
+                        }
+                        $event['width'] = 1/$width;
                     }
 
-                    $i = 0;
-                    foreach ($overlapping + [$event] as $key => $_event) {
-                        if (isset($a[$key])) {
-                            continue;
-                        }
-                        $_event['overlap'] = true;
-                        $_event['overlap_index'] = $i;
-                        $_event['overlap_total'] = count($overlapping);
-                        $this->events[$year][$week][$key] = $_event;
-                        $a[$key] = true;
-                        $i++;
-                    }
+                    //error_log(print_r($slots, true));
                 }
             }
         }
+
+        //error_log(print_r($this->events, true));
     }
 
     protected function renderLogo()
@@ -284,19 +309,19 @@ class PDFCalendar
     protected function renderDays()
     {
         // Render days.
-        for ($day_in_week = 1; $day_in_week <= self::DAYS_IN_WEEK; $day_in_week++) {
+        for ($day_in_week = 1; $day_in_week <= $this->config['days_in_week']; $day_in_week++) {
             $this->pdf->setXY($this->getDayX($day_in_week), $this->days['y']);
             $this->pdf->MultiCell(
                 $this->getDayWidth(),
                 $this->days['h'],
-                $this->pdf->SanitizeText($this->getDateTime('D j', $day_in_week)),
+                $this->pdf->SanitizeText($this->getDateTime($this->config['date_format'], $day_in_week)),
                 0,
                 'C'
             );
         }
 
         // Draw vertical lines
-        for ($day_in_week = 2; $day_in_week <= self::DAYS_IN_WEEK; $day_in_week++) {
+        for ($day_in_week = 2; $day_in_week <= $this->config['days_in_week']; $day_in_week++) {
             $this->pdf->SetFillColor($this->config['color_light']);
             $this->pdf->SetDrawColor($this->config['color_light']);
             $this->pdf->Rect($this->getDayX($day_in_week), $this->hours['y'], $this->config['line_width'], $this->hours['h'], 'DF');
@@ -307,7 +332,7 @@ class PDFCalendar
 
     protected function renderHours()
     {
-        for ($hour = $this->hour_start; $hour <= $this->hour_end; $hour += 0.5) {
+        for ($hour = $this->config['hour_start']; $hour <= $this->config['hour_end']; $hour += 0.5) {
             // Text
             $this->pdf->setXY($this->hours['x'], $this->getTimeY($hour));
             $this->pdf->setFontSize($this->config['font_size_small']);
@@ -326,10 +351,12 @@ class PDFCalendar
 
     protected function renderEvents()
     {
-        $events = $this->getEvents();
+        $week_events = $this->getEvents();
 
-        foreach ($events as $event) {
-            $this->renderEvent($event);
+        foreach ($week_events as $events) {
+            foreach ($events as $event) {
+                $this->renderEvent($event);
+            }
         }
     }
 
@@ -341,11 +368,9 @@ class PDFCalendar
         $h = $this->getTimeY($event['end']) - $y;
 
         // Overlap.
-        if (! empty($event['overlap'])) {
-            $x += $w / $event['overlap_total'] * $event['overlap_index'];
-            $w = $w / $event['overlap_total'];
-        }
-
+        $w = $w * $event['width'];
+        $x += $w * $event['index'];
+            
         // Draw frame.
         $this->pdf->Rect($x, $y, $w, $h, 'DF');
 
@@ -391,22 +416,6 @@ class PDFCalendar
         $this->week = $week;
         $this->year = $year;
 
-        // Set hour range
-        $events = $this->getEvents();
-
-        $this->hour_start = $this->config['hour_start'];
-        $this->hour_end   = $this->config['hour_end'];
-
-        foreach ($events as $event) {
-            if ($event['start'] < $this->hour_start) {
-                $this->hour_start = $event['start'];
-            }
-
-            if ($event['end'] > $this->hour_end) {
-                $this->hour_end = $event['end'];
-            }
-        }
-
         $this->pdf->SetAutoPageBreak(false, $this->margin['y']);
         $this->pdf->AddPage($this->page['w'] > $this->page['h'] ? 'L' : 'P', [$this->page['w'], $this->page['h']]);
 
@@ -422,6 +431,10 @@ class PDFCalendar
 
     public function render()
     {
+        $this->prepare();
+
+        //return;
+
         $this->pdf = new PDF();
         $this->pdf->SetTitle($this->config['file_title']);
         $this->pdf->setMargins(0, 0, 0);
@@ -430,14 +443,7 @@ class PDFCalendar
         $this->pdf->SetDrawColor($this->config['draw_color']);
         $this->pdf->SetFillColor($this->config['fill_color']);
 
-        // Sort events on year
-        ksort($this->events, SORT_NUMERIC);
-
         foreach ($this->events as $year => $year_events) {
-            // Sort events on week
-            ksort($year_events, SORT_NUMERIC);
-
-            // Render weeks
             foreach ($year_events as $week => $week_events) {
                 $this->renderWeek($week, $year);
             }
