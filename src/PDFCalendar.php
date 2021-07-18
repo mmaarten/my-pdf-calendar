@@ -79,7 +79,7 @@ class PDFCalendar
             'x' => $this->content['x'] + $hours_w,
             'y' => $this->content['y'],
             'w' => $this->content['w'] - $hours_w,
-            'h' => 10,
+            'h' => 12,
         ];
 
         $this->hours = [
@@ -151,7 +151,7 @@ class PDFCalendar
 
     protected function getTimeY($hours)
     {
-        return $this->hours['y'] + (($this->hours['h'] / ($this->config['hour_end'] - $this->config['hour_start'])) * ($hours - $this->config['hour_start']));
+        return $this->hours['y'] + (($this->hours['h'] / ($this->hour_end - $this->hour_start)) * ($hours - $this->hour_start));
     }
 
     protected function getDateTime($format, $day_of_week = 1)
@@ -175,13 +175,11 @@ class PDFCalendar
 
         if ($month_1 == $month_2 && $year_1 == $year_2) {
             $return =  "{$month_1} {$year_1}";
-        }
-
-        if ($month_1 != $month_2 && $year_1 == $year_2) {
+        } else if ($month_1 != $month_2 && $year_1 == $year_2) {
             $return = "{$month_1} - {$month_2} {$year_1}";
+        } else {
+            $return =  "{$month_1} {$year_1} - {$month_2} {$year_2}";
         }
-
-        $return =  "{$month_1} {$year_1} - {$month_2} {$year_2}";
     
         $callback = $this->config['month_text'];
 
@@ -211,29 +209,31 @@ class PDFCalendar
                     
                     $slots = [];
                     foreach ($events as &$event) {
-                        //
+                        // Prevents event overlapping when end time is equal to start time.
                         $event['end'] -= 1/(60*60);
                         // Get available slot
                         $index = 0;
-                        $free = false;
-                        while (! $free) {
-                            $free = true;
+                        $stop = false;
+                        while (! $stop) {
+                            $stop = true;
                             for ($hour = $event['start']; $hour <= $event['end']; $hour += 1/60) {
                                 if (isset($slots["$hour"][$index])) {
-                                    $free = false;
+                                    $stop = false;
                                     $index++;
                                     break;
                                 }
                             }
                         }
-                        $event['index'] = $index;
                         // Add event to slot
                         for ($hour = $event['start']; $hour <= $event['end']; $hour += 1/60) {
                             $slots["$hour"][$index] = $event['id'];
                         }
+                        // Store index
+                        $event['index'] = $index;
                     }
+
                     foreach ($events as &$event) {
-                        $width = 0;
+                        $width = 1;
                         for ($hour = $event['start']; $hour <= $event['end']; $hour += 1/60) {
                             $count = count($slots["$hour"]);
                             if ($count > $width) {
@@ -332,7 +332,7 @@ class PDFCalendar
 
     protected function renderHours()
     {
-        for ($hour = $this->config['hour_start']; $hour <= $this->config['hour_end']; $hour += 0.5) {
+        for ($hour = $this->hour_start; $hour <= $this->hour_end; $hour += 0.5) {
             // Text
             $this->pdf->setXY($this->hours['x'], $this->getTimeY($hour));
             $this->pdf->setFontSize($this->config['font_size_small']);
@@ -415,6 +415,25 @@ class PDFCalendar
     {
         $this->week = $week;
         $this->year = $year;
+
+        //
+        $this->hour_start = $this->config['hour_start'];
+        $this->hour_end   = $this->config['hour_end'];
+
+        $week_events = $this->getEvents();
+
+        foreach ($week_events as $events) {
+            foreach ($events as $event) {
+                if ($event['start'] < $this->hour_start) {
+                    $this->hour_start = $event['start'];
+                }
+                if ($event['end'] > $this->hour_end) {
+                    $this->hour_end = $event['end'];
+                }
+            }
+        }
+
+        //
 
         $this->pdf->SetAutoPageBreak(false, $this->margin['y']);
         $this->pdf->AddPage($this->page['w'] > $this->page['h'] ? 'L' : 'P', [$this->page['w'], $this->page['h']]);

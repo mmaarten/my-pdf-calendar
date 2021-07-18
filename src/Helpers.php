@@ -42,4 +42,27 @@ class Helpers
 
         return compact('width', 'height');
     }
+
+    /**
+     * Do dates overlap
+     *
+     * @link https://stackoverflow.com/a/325964
+     * @param mixed $a_start
+     * @param mixed $a_end
+     * @param mixed $b_start
+     * @param mixed $b_end
+     * @return bool
+     */
+    public static function doDatesOverlap($a_start, $a_end, $b_start, $b_end)
+    {
+        if ($a_start < $b_end && $b_start < $a_end && $a_start < $a_end && $b_start < $b_end) {
+            return true;
+        }
+
+        if ($a_start < $b_end && $a_start < $a_end && $b_start < $a_end && $b_start < $b_end) {
+            return true;
+        }
+
+        return false;
+    }
 }
