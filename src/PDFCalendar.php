@@ -4,17 +4,19 @@ namespace My\PDFCalendar;
 
 class PDFCalendar
 {
-    protected $pdf     = null;
-    protected $config  = [];
-    protected $page    = [];
-    protected $header  = [];
-    protected $content = [];
-    protected $days    = [];
-    protected $hours   = [];
-    protected $events  = [];
-    protected $slots   = [];
-    protected $year    = null;
-    protected $week    = null;
+    protected $pdf        = null;
+    protected $config     = [];
+    protected $page       = [];
+    protected $header     = [];
+    protected $content    = [];
+    protected $footer     = [];
+    protected $days       = [];
+    protected $hours      = [];
+    protected $categories = [];
+    protected $events     = [];
+    protected $slots      = [];
+    protected $year       = null;
+    protected $week       = null;
 
     public function __construct($config = [])
     {
@@ -40,6 +42,7 @@ class PDFCalendar
             'hour_start'          => 9,
             'hour_end'            => 17,
             'events'              => [],
+            'categories'          => [],
             'event_default_color' => [0, 0, 0],
             'logo_wrapper_width'  => 50,
             'date_format'         => 'D j',
@@ -54,7 +57,7 @@ class PDFCalendar
 
         $this->page = [
             'w' => 297,
-            'h' => 220,
+            'h' => 210,
         ];
 
         $this->header = [
@@ -62,6 +65,15 @@ class PDFCalendar
             'y' => $this->margin['y'],
             'w' => $this->page['w'] - $this->margin['x'] * 2,
             'h' => 10,
+        ];
+
+        $footer_height = $this->config['categories'] ? 3 : 0;
+
+        $this->footer = [
+            'x' => $this->margin['x'],
+            'y' => $this->page['h'] - $this->margin['y'] - $footer_height,
+            'w' => $this->page['w'] - $this->margin['x'] * 2,
+            'h' => $footer_height,
         ];
 
         $content_margin_y = 4;
@@ -72,6 +84,10 @@ class PDFCalendar
             'w' => $this->page['w'] - $this->margin['x'] * 2,
             'h' => $this->page['h'] - $this->header['y'] - $this->header['h'] - $this->margin['y'] - $content_margin_y,
         ];
+
+        if ($this->footer['h']) {
+            $this->content['h'] -= $this->footer['h'] + $content_margin_y + 4;
+        }
 
         $hours_w = 15;
 
@@ -89,22 +105,39 @@ class PDFCalendar
             'h' => $this->content['h'] - $this->days['h'],
         ];
 
+        // Add categories.
+        foreach ($this->config['categories'] as $category) {
+            $this->addCategory($category);
+        }
+
         // Add events.
         foreach ($this->config['events'] as $event) {
             $this->addEvent($event);
         }
     }
 
-    public function addEvent($args)
+    protected function addCategory($args)
     {
-        $event = wp_parse_args($args, [
+        $category = wp_parse_args($args, [
             'id'    => '',
             'name'  => '',
-            'date'  => '', // Y-m-d
-            'start' => '', // H:i:s
-            'end'   => '', // H:i:s
-            'text'  => '',
-            'color' => $this->config['event_default_color'],
+            'color'  => [],
+        ]);
+
+        $this->categories[$category['id']] = $category;
+    }
+
+    protected function addEvent($args)
+    {
+        $event = wp_parse_args($args, [
+            'id'       => '',
+            'name'     => '',
+            'date'     => '', // Y-m-d
+            'start'    => '', // H:i:s
+            'end'      => '', // H:i:s
+            'text'     => '',
+            'color'    => $this->config['event_default_color'],
+            'category' => '',
         ]);
 
         $date = strtotime($args['date']);
@@ -126,6 +159,7 @@ class PDFCalendar
         $event['week']        = intval(date('W', $date));
         $event['day_of_week'] = intval(date('N', $date));
         $event['color']       = $args['color'];
+        $event['category']    = $args['category'];
 
         $this->events[$event['year']][$event['week']][$event['day_of_week']][$event['id']] = $event;
     }
@@ -180,7 +214,7 @@ class PDFCalendar
         } else {
             $return =  "{$month_1} {$year_1} - {$month_2} {$year_2}";
         }
-    
+
         $callback = $this->config['month_text'];
 
         if ($callback && is_callable($callback)) {
@@ -198,7 +232,7 @@ class PDFCalendar
         return ($a['start'] < $b['start']) ? -1 : 1;
     }
 
-    public function prepare()
+    protected function prepare()
     {
         foreach ($this->events as $year => &$year_events) {
             ksort($year_events);
@@ -206,7 +240,7 @@ class PDFCalendar
                 ksort($week_events);
                 foreach ($week_events as $day_of_week => &$events) {
                     usort($events, [$this, 'sortEvents']);
-                    
+
                     $slots = [];
                     foreach ($events as &$event) {
                         // Prevents event overlapping when end time is equal to start time.
@@ -242,13 +276,9 @@ class PDFCalendar
                         }
                         $event['width'] = 1/$width;
                     }
-
-                    //error_log(print_r($slots, true));
                 }
             }
         }
-
-        //error_log(print_r($this->events, true));
     }
 
     protected function renderLogo()
@@ -370,12 +400,14 @@ class PDFCalendar
         // Overlap.
         $w = $w * $event['width'];
         $x += $w * $event['index'];
-            
+
+        $category = $event['category'] && isset($this->categories[$event['category']]) ? $this->categories[$event['category']] : null;
+
         // Draw frame.
         $this->pdf->Rect($x, $y, $w, $h, 'DF');
 
         // Draw color.
-        $this->pdf->SetFillColor($event['color']);
+        $this->pdf->SetFillColor($category ? $category['color'] : $event['color']);
         $this->pdf->Rect($x, $y, $w, 1, 'F');
         $this->pdf->SetFillColor($this->config['fill_color']);
 
@@ -400,11 +432,40 @@ class PDFCalendar
         }
     }
 
+    protected function renderFooter()
+    {
+        $cols = count($this->categories);
+        $col_width = $this->footer['w'] / $cols;
+
+        $categories = array_values($this->categories);
+
+        for ($col = 0; $col < $cols; $col++) {
+            $category = $categories[$col];
+
+            $x = $this->footer['x'] + $col_width * $col + 1;
+            $y = $this->footer['y'];
+            $thumb_size = 3;
+
+            $this->pdf->setXY($x, $y);
+
+            // Draw color.
+            $this->pdf->SetFillColor($category['color']);
+            $this->pdf->Rect($x, $y, $thumb_size, $thumb_size, 'F');
+            $this->pdf->SetFillColor($this->config['fill_color']);
+
+            // Draw name.
+            $this->pdf->setXY($x + $thumb_size + 1, $y - .5);
+            $this->pdf->SetFont($this->config['font_family'], '', $this->config['font_size_small']);
+            $this->pdf->MultiCell($col_width, $this->config['line_height_small'], $this->pdf->SanitizeText($category['name']), 0, 'L');
+            $this->pdf->SetFont($this->config['font_family'], $this->config['font_weight'], $this->config['font_size_base']);
+        }
+    }
+
     protected function renderGuides()
     {
         $this->pdf->SetDrawColor([255, 0, 0]);
 
-        foreach ([$this->header, $this->content, $this->days, $this->hours] as $subject) {
+        foreach ([$this->header, $this->content, $this->days, $this->hours, $this->footer] as $subject) {
             $this->pdf->Rect($subject['x'], $subject['y'], $subject['w'], $subject['h'], 'D');
         }
 
@@ -442,6 +503,7 @@ class PDFCalendar
         $this->renderDays();
         $this->renderHours();
         $this->renderEvents();
+        $this->renderFooter();
 
         if ($this->config['debug']) {
             $this->renderGuides();
