@@ -434,6 +434,10 @@ class PDFCalendar
 
     protected function renderFooter()
     {
+        if (! $this->categories) {
+            return;
+        }
+
         $cols = count($this->categories);
         $col_width = $this->footer['w'] / $cols;
 
